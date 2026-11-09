@@ -1,0 +1,17 @@
+# build output
+/pg-copycheck
+/pg-copycheck.exe
+/genfixture
+/genfixture.exe
+/bin/
+
+# large generated fixtures and run artifacts
+/demo/
+*.big.csv
+clean*.csv
+rejects*.csv
+
+# test and profiling output
+*.out
+*.prof
+/internal/csvpg/testdata/fuzz/
