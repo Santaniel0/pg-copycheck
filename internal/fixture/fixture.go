@@ -36,7 +36,7 @@ const (
 	FaultBadBool
 	FaultMissingColumn
 	FaultZoneName
-	faultCount
+	NumFaults // number of fault kinds
 )
 
 var faultNames = [...]string{
@@ -130,7 +130,7 @@ func Generate(w io.Writer, cfg Config) ([]Injected, error) {
 		fault, hasFault := Fault(0), false
 		if cfg.FaultEach > 0 && row%cfg.FaultEach == 0 && row > 1 {
 			fault, hasFault = nextFault, true
-			nextFault = (nextFault + 1) % faultCount
+			nextFault = (nextFault + 1) % NumFaults
 		}
 		buf = appendRow(buf[:0], rng, row, fault, hasFault)
 		record++

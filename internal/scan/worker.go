@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash"
 	"hash/fnv"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -82,6 +83,21 @@ func encodingProblem(seq string) Problem {
 		Title:    `invalid byte sequence for encoding "UTF8"`,
 		Message:  `invalid byte sequence for encoding "UTF8": ` + seq,
 	}
+}
+
+// quoteValue quotes v for display, cut to 60 characters.
+func quoteValue(v []byte) string {
+	const limit = 60
+	if utf8.RuneCount(v) <= limit {
+		return strconv.Quote(string(v))
+	}
+	cut, n := 0, 0
+	for cut < len(v) && n < limit {
+		_, size := utf8.DecodeRune(v[cut:])
+		cut += size
+		n++
+	}
+	return strconv.Quote(string(v[:cut])) + "..."
 }
 
 type unsureHit struct {
@@ -175,10 +191,16 @@ func (w *worker) check(b *batch, i int) {
 		out := p.checkers[c].Check(val)
 		switch out.Verdict {
 		case pginput.Invalid:
-			probs = append(probs, Problem{
+			pr := Problem{
 				Severity: SeverityError, SQLState: out.SQLState, Title: out.Title, Column: col.Name,
 				Message: out.Message, Detail: out.Detail, Hint: out.Hint,
-			})
+			}
+			// Some messages (json, length and numeric overflow) do not quote
+			// the value, which is the first thing one wants to see.
+			if len(val) > 0 && !strings.Contains(out.Message, string(val)) {
+				pr.Note = "value: " + quoteValue(val)
+			}
+			probs = append(probs, pr)
 		case pginput.Unsure:
 			w.hits = append(w.hits, unsureHit{c, out.Title, val})
 		}
