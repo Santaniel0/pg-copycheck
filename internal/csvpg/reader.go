@@ -223,6 +223,30 @@ func (r *Reader) Next() (Record, error) {
 		escapeOn = r.escapeActive
 	)
 	for bodyLen < 0 {
+		// Jump over bytes that cannot change the state: everything except
+		// quote, CR and LF outside quotes, and quote and escape inside.
+		if window := r.buf[r.start+pos : r.end]; len(window) > 0 {
+			var k int
+			switch {
+			case !inQuote:
+				k = indexOf3(window, '\n', quote, '\r')
+			case escapeOn:
+				k = indexOf3(window, quote, esc, quote)
+			default:
+				k = indexOf3(window, quote, quote, quote)
+			}
+			if k != 0 {
+				if k < 0 {
+					k = len(window)
+				}
+				pos += k
+				lastEsc = false
+				if pos > r.maxRecord {
+					return Record{}, &RecordTooLargeError{Line: r.line, Offset: r.offset, Limit: r.maxRecord}
+				}
+				continue
+			}
+		}
 		c, ok := r.byteAt(pos)
 		if !ok {
 			if r.readErr != nil {
@@ -303,6 +327,30 @@ func (r *Reader) Next() (Record, error) {
 	r.offset += int64(pos)
 	r.start += pos
 	return rec, nil
+}
+
+// indexOf3 returns the index of the first x, y or z in b, or -1. Three
+// IndexByte calls, each over a shrinking prefix, beat a byte-by-byte loop
+// because IndexByte is vectorised.
+func indexOf3(b []byte, x, y, z byte) int {
+	end := bytes.IndexByte(b, x)
+	if end < 0 {
+		end = len(b)
+	}
+	if y != x {
+		if j := bytes.IndexByte(b[:end], y); j >= 0 {
+			end = j
+		}
+	}
+	if z != x && z != y {
+		if j := bytes.IndexByte(b[:end], z); j >= 0 {
+			end = j
+		}
+	}
+	if end == len(b) {
+		return -1
+	}
+	return end
 }
 
 func firstIssue(cur, next LineIssue) LineIssue {
