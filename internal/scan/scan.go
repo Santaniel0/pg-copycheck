@@ -120,14 +120,14 @@ type runner struct {
 	slots chan struct{}
 	pool  sync.Pool
 
-	// Written by the reader before it closes the jobs channel and read by
-	// the collector after every worker has finished.
+	// Written only by the reader. bom is set before the first batch is sent,
+	// so the collector may read it once it holds that batch; the rest is read
+	// after the reader has returned.
 	eol     csvpg.EOL
 	bom     bool
 	bytes   int64
 	tooBig  *csvpg.RecordTooLargeError
 	lastNum int64
-	lastLn  int64
 }
 
 // Run checks the input against cfg.Table. It returns a *SetupError when COPY
@@ -303,7 +303,7 @@ func (r *runner) read(ctx context.Context, in io.Reader, jobs chan<- *batch) err
 			return fmt.Errorf("read input: %w", err)
 		}
 		r.bytes += int64(len(rec.Raw))
-		r.lastNum, r.lastLn = rec.Num, rec.EndLine
+		r.lastNum = rec.Num
 		if rec.Num == 1 && bytes.HasPrefix(rec.Raw, []byte("\xef\xbb\xbf")) {
 			r.bom = true
 		}
