@@ -1,0 +1,218 @@
+# What PostgreSQL does with each input, and where that comes from.
+#
+# Columns (tab-separated): type, settings, input, verdict, message, source
+#   type      column type as written in DDL ("rainbow" is the enum from enum.sql)
+#   settings  "-" or comma-separated: v15 / v16 / v17 / v18, mdy / dmy / ymd
+#   input     Go-quoted string
+#   verdict   PostgreSQL's answer: valid or invalid. A trailing "?" means the
+#             offline checker is allowed to answer unsure; without it the
+#             checker must give exactly this verdict.
+#   message   Go-quoted expected error ("" = not compared). Hint and detail are
+#             appended as " | HINT: ..." and " | DETAIL: ...".
+#   source    regression file (src/test/regress/expected/*.out, REL_17_STABLE)
+#             or source file the verdict was taken from.
+
+# integer: numutils.c pg_strtoint32_safe; inputs from int4.out
+integer	-	"34"	valid	""	int4.out pg_input_is_valid('34','int4')
+integer	-	"34.5"	invalid	"invalid input syntax for type integer: \"34.5\""	int4.out
+integer	-	"1000000000000"	invalid	"value \"1000000000000\" is out of range for type integer"	int4.out
+integer	-	"asdf"	invalid	"invalid input syntax for type integer: \"asdf\""	int4.out
+integer	-	"     "	invalid	"invalid input syntax for type integer: \"     \""	int4.out
+integer	-	"   asdf   "	invalid	"invalid input syntax for type integer: \"   asdf   \""	int4.out
+integer	-	"- 1234"	invalid	"invalid input syntax for type integer: \"- 1234\""	int4.out
+integer	-	"123       5"	invalid	"invalid input syntax for type integer: \"123       5\""	int4.out
+integer	-	""	invalid	"invalid input syntax for type integer: \"\""	int4.out
+integer	-	"0x42F"	valid	""	int4.out
+integer	-	"0b100101"	valid	""	int4.out
+integer	-	"0o273"	valid	""	int4.out
+integer	-	"0b"	invalid	"invalid input syntax for type integer: \"0b\""	int4.out
+integer	-	"0x"	invalid	"invalid input syntax for type integer: \"0x\""	int4.out
+integer	-	"0x7FFFFFFF"	valid	""	int4.out
+integer	-	"0x80000000"	invalid	"value \"0x80000000\" is out of range for type integer"	int4.out
+integer	-	"-0x80000000"	valid	""	int4.out
+integer	-	"-0x80000001"	invalid	"value \"-0x80000001\" is out of range for type integer"	int4.out
+integer	-	"1_000_000"	valid	""	int4.out
+integer	-	"0x1EEE_FFFF"	valid	""	int4.out
+integer	-	"0b_10_0101"	valid	""	int4.out
+integer	-	"_100"	invalid	"invalid input syntax for type integer: \"_100\""	int4.out
+integer	-	"100_"	invalid	"invalid input syntax for type integer: \"100_\""	int4.out
+integer	-	"100__000"	invalid	"invalid input syntax for type integer: \"100__000\""	int4.out
+integer	-	"  -2147483648  "	valid	""	numutils.c: leading and trailing isspace allowed, PG_INT32_MIN
+integer	-	"2147483648"	invalid	"value \"2147483648\" is out of range for type integer"	numutils.c final tmp > PG_INT32_MAX check
+integer	-	"+42"	valid	""	numutils.c sign handling
+integer	-	"12 шт"	invalid	"invalid input syntax for type integer: \"12 шт\""	numutils.c trailing characters
+integer	v15	"1_000"	invalid	"invalid input syntax for type integer: \"1_000\""	underscores added in 16 (release-16 notes; REL_15 numutils.c pg_strtoint32)
+integer	v15	"0x1F"	invalid	"invalid input syntax for type integer: \"0x1F\""	non-decimal input added in 16 (release-16 notes)
+smallint	-	"100000"	invalid	"value \"100000\" is out of range for type smallint"	int2.out
+smallint	-	"-32768"	valid	""	numutils.c pg_strtoint16_safe, PG_INT16_MIN
+bigint	-	"-9223372036854775808"	valid	""	numutils.c pg_strtoint64_safe, PG_INT64_MIN
+bigint	-	"9223372036854775808"	invalid	"value \"9223372036854775808\" is out of range for type bigint"	numutils.c final range check
+
+# numeric: numeric.c numeric_in / set_var_from_str / apply_typmod; inputs from numeric.out
+numeric	-	"  -93853"	valid	""	numeric.out num_input_test
+numeric	-	" NaN  "	valid	""	numeric.out num_input_test
+numeric	-	" inFinity "	valid	""	numeric.out num_input_test
+numeric	-	" -inFinity "	valid	""	numeric.out num_input_test
+numeric	-	"     "	invalid	"invalid input syntax for type numeric: \"     \""	numeric.out
+numeric	-	"xyz"	invalid	"invalid input syntax for type numeric: \"xyz\""	numeric.out
+numeric	-	"- 1234"	invalid	"invalid input syntax for type numeric: \"- 1234\""	numeric.out
+numeric	-	"5 . 0"	invalid	"invalid input syntax for type numeric: \"5 . 0\""	numeric.out
+numeric	-	"+NaN"	invalid	"invalid input syntax for type numeric: \"+NaN\""	numeric.out (NaN takes no sign)
+numeric	-	"-NaN"	invalid	"invalid input syntax for type numeric: \"-NaN\""	numeric.out
+numeric	-	"1e"	invalid	"invalid input syntax for type numeric: \"1e\""	numeric.c set_var_from_str exponent digits required
+numeric	-	".5"	valid	""	numeric.c set_var_from_str leading decimal point
+numeric	-	"5."	valid	""	numeric.c set_var_from_str trailing decimal point
+numeric	-	"."	invalid	"invalid input syntax for type numeric: \".\""	numeric.c set_var_from_str digit required after point
+numeric	-	"1_000.5"	valid	""	numeric.c set_var_from_str underscores (16+)
+numeric	-	"1._5"	invalid	"invalid input syntax for type numeric: \"1._5\""	numeric.c: decimal point must not be followed by underscore
+numeric	-	"0x42F"	valid	""	numeric.c numeric_in non-decimal prefix (16+)
+numeric	v15	"0x42F"	invalid	"invalid input syntax for type numeric: \"0x42F\""	non-decimal input added in 16
+numeric	-	"1e2000000000"	invalid	"value overflows numeric format"	numeric.c set_var_from_str: exponent > PG_INT32_MAX / 2
+numeric	-	"1e200000"	invalid?	""	numeric.c make_result: weight beyond NUMERIC_WEIGHT_MAX (not modelled)
+numeric(12,2)	-	"9999999999.994"	valid	""	numeric.c apply_typmod rounds to scale first
+numeric(12,2)	-	"9999999999.995"	invalid	"numeric field overflow | DETAIL: A field with precision 12, scale 2 must round to an absolute value less than 10^10."	numeric.c apply_typmod
+numeric(12,2)	-	"12345678901"	invalid	"numeric field overflow | DETAIL: A field with precision 12, scale 2 must round to an absolute value less than 10^10."	numeric.c apply_typmod
+numeric(12,2)	-	"Infinity"	invalid	"numeric field overflow | DETAIL: A field with precision 12, scale 2 cannot hold an infinite value."	numeric.c apply_typmod_special
+numeric(12,2)	-	"NaN"	valid	""	numeric.c apply_typmod_special: NaN is allowed
+numeric(3,3)	-	"0.9995"	invalid	"numeric field overflow | DETAIL: A field with precision 3, scale 3 must round to an absolute value less than 1."	numeric.c apply_typmod (10^0 displayed as 1)
+numeric(3,3)	-	"0.9994"	valid	""	numeric.c apply_typmod
+numeric(5,2)	-	"-0.004"	valid	""	numeric.c round_var to zero
+
+# real / double precision: float.c; inputs from float4.out and float8.out
+double precision	-	"     "	invalid	"invalid input syntax for type double precision: \"     \""	float8.out
+double precision	-	"xyz"	invalid	"invalid input syntax for type double precision: \"xyz\""	float8.out
+double precision	-	"5.0.0"	invalid	"invalid input syntax for type double precision: \"5.0.0\""	float8.out
+double precision	-	"5 . 0"	invalid	"invalid input syntax for type double precision: \"5 . 0\""	float8.out
+double precision	-	"    - 3"	invalid	"invalid input syntax for type double precision: \"    - 3\""	float8.out
+double precision	-	"123           5"	invalid	"invalid input syntax for type double precision: \"123           5\""	float8.out
+double precision	-	"10e400"	invalid	"\"10e400\" is out of range for type double precision"	float8.out
+double precision	-	"-10e400"	invalid	"\"-10e400\" is out of range for type double precision"	float8.out
+double precision	-	"10e-400"	invalid	"\"10e-400\" is out of range for type double precision"	float8.out
+double precision	-	"   NAN  "	valid	""	float8.out
+double precision	-	"          -INFINiTY   "	valid	""	float8.out
+double precision	-	"N A N"	invalid	"invalid input syntax for type double precision: \"N A N\""	float8.out
+double precision	-	"NaN x"	invalid	"invalid input syntax for type double precision: \"NaN x\""	float8.out
+double precision	-	" INFINITY    x"	invalid	"invalid input syntax for type double precision: \" INFINITY    x\""	float8.out
+double precision	-	"4e-320"	valid	""	float.c: ERANGE with a non-zero (denormal) result is accepted
+double precision	-	"0x1p3"	valid?	""	float.c: hex input depends on strtod
+double precision	-	"-nan"	valid?	""	float.c: signed NaN depends on strtod
+real	-	"10e70"	invalid	"\"10e70\" is out of range for type real"	float4.out
+real	-	"-10e70"	invalid	"\"-10e70\" is out of range for type real"	float4.out
+real	-	"10e-70"	invalid	"\"10e-70\" is out of range for type real"	float4.out
+real	-	"1.2345678901234e+20"	valid	""	float4.out
+
+# boolean: bool.c; inputs from boolean.out
+boolean	-	"t"	valid	""	boolean.out
+boolean	-	"   f           "	valid	""	boolean.out
+boolean	-	"tru"	valid	""	bool.c: any prefix of "true"
+boolean	-	"test"	invalid	"invalid input syntax for type boolean: \"test\""	boolean.out
+boolean	-	"o"	invalid	"invalid input syntax for type boolean: \"o\""	boolean.out
+boolean	-	"on"	valid	""	boolean.out
+boolean	-	"of"	valid	""	boolean.out
+boolean	-	"off_"	invalid	"invalid input syntax for type boolean: \"off_\""	boolean.out
+boolean	-	"yeah"	invalid	"invalid input syntax for type boolean: \"yeah\""	boolean.out
+boolean	-	"nay"	invalid	"invalid input syntax for type boolean: \"nay\""	boolean.out
+boolean	-	"11"	invalid	"invalid input syntax for type boolean: \"11\""	boolean.out
+boolean	-	"000"	invalid	"invalid input syntax for type boolean: \"000\""	boolean.out
+boolean	-	""	invalid	"invalid input syntax for type boolean: \"\""	boolean.out
+boolean	-	"YES"	valid	""	bool.c: case-insensitive
+boolean	-	"да"	invalid	"invalid input syntax for type boolean: \"да\""	bool.c
+
+# character varying / character: varchar.c; inputs from varchar.out and char.out
+varchar(1)	-	"cd"	invalid	"value too long for type character varying(1)"	varchar.out
+varchar(1)	-	"c     "	valid	""	varchar.out (trailing spaces are truncated)
+varchar(4)	-	"абвг"	valid	""	varchar.c: limit counts characters, not bytes
+varchar(4)	-	"абвгд"	invalid	"value too long for type character varying(4)"	varchar.c
+char(1)	-	"cd"	invalid	"value too long for type character(1)"	char.out
+char(1)	-	"c     "	valid	""	char.out
+text	-	"anything at all"	valid	""	text has no input restrictions beyond encoding
+
+# uuid: uuid.c string_to_uuid; inputs from uuid.out and the uuid type docs
+uuid	-	"11111111-1111-1111-1111-111111111111F"	invalid	"invalid input syntax for type uuid: \"11111111-1111-1111-1111-111111111111F\""	uuid.out
+uuid	-	"{11111111-1111-1111-1111-11111111111}"	invalid	"invalid input syntax for type uuid: \"{11111111-1111-1111-1111-11111111111}\""	uuid.out
+uuid	-	"111-11111-1111-1111-1111-111111111111"	invalid	"invalid input syntax for type uuid: \"111-11111-1111-1111-1111-111111111111\""	uuid.out
+uuid	-	"{22222222-2222-2222-2222-222222222222"	invalid	"invalid input syntax for type uuid: \"{22222222-2222-2222-2222-222222222222\""	uuid.out
+uuid	-	"11111111-1111-1111-G111-111111111111"	invalid	"invalid input syntax for type uuid: \"11111111-1111-1111-G111-111111111111\""	uuid.out
+uuid	-	"11+11111-1111-1111-1111-111111111111"	invalid	"invalid input syntax for type uuid: \"11+11111-1111-1111-1111-111111111111\""	uuid.out
+uuid	-	"A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11"	valid	""	datatype-uuid docs
+uuid	-	"{a0eebc99-9c0b4ef8-bb6d6bb9-bd380a11}"	valid	""	datatype-uuid docs
+uuid	-	"a0eebc999c0b4ef8bb6d6bb9bd380a11"	valid	""	datatype-uuid docs
+uuid	-	"a0ee-bc99-9c0b-4ef8-bb6d-6bb9-bd38-0a11"	valid	""	datatype-uuid docs
+uuid	-	" a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"	invalid	"invalid input syntax for type uuid: \" a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11\""	uuid.c: no whitespace skipping
+
+# json / jsonb: jsonapi.c; inputs from json.out and jsonb.out
+json	-	"\"\""	valid	""	json.out
+json	-	"''"	invalid	"invalid input syntax for type json"	json.out
+json	-	"\"\\v\""	invalid	"invalid input syntax for type json | DETAIL: Escape sequence \"\\v\" is invalid."	json.out
+json	-	"01"	invalid	"invalid input syntax for type json"	json.out (not valid according to JSON spec)
+json	-	"0.1"	valid	""	json.out
+json	-	"1f2"	invalid	"invalid input syntax for type json"	json.out
+json	-	"0.x1"	invalid	"invalid input syntax for type json"	json.out
+json	-	"1.3ex100"	invalid	"invalid input syntax for type json"	json.out
+json	-	"{\"abc\":1:2}"	invalid	"invalid input syntax for type json"	json.out
+json	-	"{\"abc\":1,\"def\":2,\"ghi\":[3,4],\"hij\":{\"klm\":5,\"nop\":[6]}}"	valid	""	json.out
+json	-	"[1,2,]"	invalid	"invalid input syntax for type json"	jsonapi.c grammar: value required after comma
+json	-	""	invalid	"invalid input syntax for type json | DETAIL: The input string ended unexpectedly."	jsonapi.c
+json	-	"\"tab\there\""	invalid	"invalid input syntax for type json | DETAIL: Character with value 0x09 must be escaped."	jsonapi.c: bytes <= 31 in strings
+json	-	"{ \"a\":  \"null \\u0000 escape\" }"	valid	""	json.out (json keeps \u0000 unconverted)
+json	-	"\"\\ud83d\\ud83d\""	valid	""	jsonapi.c: surrogate checks only run when de-escaping (jsonb)
+jsonb	-	"{ \"a\":  \"null \\u0000 escape\" }"	invalid	"unsupported Unicode escape sequence | DETAIL: \\u0000 cannot be converted to text."	jsonb.out
+jsonb	-	"{ \"a\":  \"\\ud83d\\ud83d\" }"	invalid	"invalid input syntax for type json | DETAIL: Unicode high surrogate must not follow a high surrogate."	jsonb.out
+jsonb	-	"{ \"a\":  \"\\ude04\\ud83d\" }"	invalid	"invalid input syntax for type json | DETAIL: Unicode low surrogate must follow a high surrogate."	jsonb.out
+jsonb	-	"{ \"a\":  \"\\ud83d\\ude04\\ud83d\\udc36\" }"	valid	""	jsonb.out (correct_in_utf8)
+jsonb	-	"{\"n\": 1e999999}"	invalid?	""	jsonb numbers go through numeric_in; weight beyond NUMERIC_WEIGHT_MAX overflows (not modelled)
+
+# enum: enum.c enum_in; inputs from enum.out
+rainbow	-	"red"	valid	""	enum.out
+rainbow	-	"mauve"	invalid	"invalid input value for enum rainbow: \"mauve\""	enum.out
+rainbow	-	"Red"	invalid	"invalid input value for enum rainbow: \"Red\""	enum.c: exact label match
+rainbow	-	" red"	invalid	"invalid input value for enum rainbow: \" red\""	enum.c: no trimming
+
+# date: datetime.c ParseDateTime / DecodeNumber / ValidateDate; inputs from date.out
+date	ymd	"1999-01-08"	valid	""	date.out
+date	ymd	"1/8/1999"	invalid	"date/time field value out of range: \"1/8/1999\" | HINT: Perhaps you need a different \"datestyle\" setting."	date.out
+date	ymd	"18/1/1999"	invalid	"date/time field value out of range: \"18/1/1999\" | HINT: Perhaps you need a different \"datestyle\" setting."	date.out
+date	ymd	"01/02/03"	valid	""	date.out (2001-02-03)
+date	ymd	"1999.008"	valid?	""	date.out (day of year, not modelled)
+date	dmy	"1/8/1999"	valid	""	date.out (1999-08-01)
+date	dmy	"1/18/1999"	invalid	"date/time field value out of range: \"1/18/1999\" | HINT: Perhaps you need a different \"datestyle\" setting."	date.out
+date	dmy	"18/1/1999"	valid	""	date.out
+date	dmy	"01/02/03"	valid	""	date.out (2003-02-01)
+date	dmy	"1999-01-18"	valid	""	date.out
+date	dmy	"January 8, 99 BC"	valid?	""	date.out (month names and BC are not modelled)
+date	mdy	"1/8/1999"	valid	""	date.out
+date	mdy	"1/18/1999"	valid	""	date.out
+date	mdy	"18/1/1999"	invalid	"date/time field value out of range: \"18/1/1999\" | HINT: Perhaps you need a different \"datestyle\" setting."	date.out
+date	mdy	"01/02/03"	valid	""	date.out (2003-01-02)
+date	-	"1997-02-29"	invalid	"date/time field value out of range: \"1997-02-29\""	date.out
+date	-	"2000-02-29"	valid	""	datetime.c ValidateDate day_tab, leap year
+date	-	"now"	valid	""	date.out pg_input_is_valid('now', 'date')
+date	-	"garbage"	invalid?	""	date.out pg_input_error_info('garbage', 'date') (words not modelled)
+date	-	"6874898-01-01"	invalid?	""	date.out (date out of range; long years not modelled)
+date	-	"0000-00-00"	invalid	"date/time field value out of range: \"0000-00-00\""	datetime.c ValidateDate: year <= 0 is DTERR_FIELD_OVERFLOW, checked before month
+date	-	"2024-13-01"	invalid	"date/time field value out of range: \"2024-13-01\" | HINT: Perhaps you need a different \"datestyle\" setting."	datetime.c ValidateDate month check (DTERR_MD_FIELD_OVERFLOW)
+date	-	""	invalid	"invalid input syntax for type date: \"\""	datetime.c DecodeDateTime: no date fields
+date	-	"--"	invalid	"invalid input syntax for type date: \"--\""	datetime.c ParseDateTime: sign not followed by digit or letter
+date	-	"31.12.2024 г."	invalid	"invalid input syntax for type date: \"31.12.2024 г.\""	datetime.c ParseDateTime: byte that is not digit, alpha, space or punct
+date	dmy	"31.12.2024"	valid	""	datetime.c ParseDateTime: matching '.' delimiters make a DTK_DATE field
+date	-	"2024-01-05 25:00"	invalid	"date/time field value out of range: \"2024-01-05 25:00\""	datetime.c time_overflows
+date	-	"2024-01-05 10:61"	invalid	"date/time field value out of range: \"2024-01-05 10:61\""	datetime.c DecodeTimeCommon minute check
+
+# timestamp / timestamptz: datetime.c, timestamp.h MAX_TZDISP_HOUR = 15
+timestamp	-	"2024-01-05T10:00:00Z"	valid	""	datetime.c: "t" ISO separator, "z" zone
+timestamp	-	"2024-01-05 24:00:00"	valid	""	datetime.c time_overflows allows exactly 24:00:00
+timestamp	-	"2024-01-05 24:00:01"	invalid	"date/time field value out of range: \"2024-01-05 24:00:01\""	datetime.c time_overflows
+timestamp	-	"2024-01-05 23:59:60"	valid	""	datetime.c DecodeTimeCommon allows sec = 60, total still within a day
+timestamp	-	"2024-01-05 10:00:00.1234567"	valid?	""	more than 6 fraction digits are rounded (not modelled)
+timestamp	dmy	"31.12.2024 23:59:59.999999"	valid	""	datetime.c
+timestamp	mdy	"31.12.2024 23:59"	invalid	"date/time field value out of range: \"31.12.2024 23:59\" | HINT: Perhaps you need a different \"datestyle\" setting."	datetime.c ValidateDate (month 31 under MDY)
+timestamptz	-	"2024-01-05 10:00:00+15:59"	valid	""	timestamp.h MAX_TZDISP_HOUR = 15
+timestamptz	-	"2024-01-05 10:00:00+16"	invalid	"time zone displacement out of range: \"2024-01-05 10:00:00+16\""	datetime.c DecodeTimezone, MAX_TZDISP_HOUR = 15
+timestamptz	-	"2024-01-05 10:00:00-0330"	valid	""	datetime.c DecodeTimezone run-together hhmm
+timestamptz	-	"2024-01-05 10:00:00 MSK"	valid?	""	zone abbreviations not modelled
+timestamptz	-	"12 Jan 2024 10:00"	valid?	""	month names not modelled
+timestamp with time zone	-	"infinity"	valid	""	datetime.c special values
+
+# types without an offline checker
+text[]	-	"{a,b}"	valid?	""	arrays are not checked offline
+interval	-	"1 day"	valid?	""	interval is not checked offline
