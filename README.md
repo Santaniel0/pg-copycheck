@@ -1,5 +1,7 @@
 # pg-copycheck
 
+[![CI](https://github.com/Santaniel0/pg-copycheck/actions/workflows/ci.yml/badge.svg)](https://github.com/Santaniel0/pg-copycheck/actions/workflows/ci.yml)
+
 Проверяет CSV-файл перед загрузкой в PostgreSQL через `COPY ... FROM` (или `\copy`). Файл читается так же, как его прочитал бы сервер, и за один проход находятся все строки, на которых COPY упадёт. Подключение к базе не нужно: достаточно схемы таблицы из `pg_dump --schema-only`.
 
 ## Зачем
@@ -22,6 +24,8 @@ pg-copycheck:
 - делит файл на `--clean` (записи, которые COPY примет, байт в байт) и `--rejects` (остальные, с причиной).
 
 ## Установка
+
+Готовые сборки для Linux, Windows и macOS лежат на странице [Releases](https://github.com/Santaniel0/pg-copycheck/releases/latest), Go для них не нужен. Собрать самому через Go:
 
 ```
 go install github.com/Santaniel0/pg-copycheck/cmd/pg-copycheck@latest
